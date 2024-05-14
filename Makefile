@@ -17,7 +17,7 @@ gdb: $(name).bin
 
 .PHONY: run
 run: $(name).bin
-	qemu-system-i386 -hda $^
+	qemu-system-i386 -nographic -drive file=$^,format=raw
 
 .PHONY: clean
 clean:
