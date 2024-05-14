@@ -1,5 +1,6 @@
 #+Title: sectorforth
 #+Author: Cesar Blum
+#+OPTIONS: toc:1
 
 sectorforth is a 16-bit x86 Forth that fits in a 512-byte boot sector.
 
