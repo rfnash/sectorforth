@@ -108,11 +108,15 @@ implement Forth in different architectures, read Brad Rodriguez's
 
 * Code
 
+** Copyright and license                                          :noexport:
+
 #+begin_src asm :tangle sectorforth.asm
   ;; sectorforth - a 512-byte, bootable x86 Forth.
   ;; Copyright (c) 2020 Cesar Blum
   ;; Distributed under the MIT license. See LICENSE for details.
 #+end_src
+
+** Introduction
 
 sectorforth is a 16-bit x86 Forth that fits entirely within a
 boot sector (512 bytes).
@@ -124,6 +128,8 @@ jumped to.
 
 The SP register is used as the data stack pointer, and the BP
 register acts as the return stack pointer.
+
+** Setup
 
 The minimum CPU required to run sectorforth is the 386, to use
 the SETNZ instruction.
@@ -148,6 +154,8 @@ On x86, the boot sector is loaded at 0x7c00 on boot. In segment
           org 0x7700
 #+end_src
 
+** Constants
+
 Define constants for the memory map. Everything is organized
 within a single 64 KB segment. TIB is placed at 0x0000 to
 simplify input parsing (the Forth variable >IN ends up being
@@ -161,6 +169,8 @@ to get a pointer to the parse area). TIB is 4 KB long.
   RP0             equ 0x76fe      ; bottom of return stack
   SP0             equ 0xfffe      ; bottom of data stack
 #+end_src
+
+** Dictionary
 
 Each dictionary entry is laid out in memory as such:
 
@@ -202,6 +212,8 @@ defword lays out a dictionary entry where it is expanded.
   %endmacro
 #+end_src
 
+** ~NEXT~
+
 NEXT advances execution to the next word. The actual code is
 placed further ahead for strategic reasons. The macro has to be
 defined here, since it's used in the words defined ahead.
@@ -209,6 +221,8 @@ defined here, since it's used in the words defined ahead.
 #+begin_src asm :tangle sectorforth.asm
   %define NEXT jmp next
 #+end_src
+
+** Primatives
 
 sectorforth has only eight primitive words, with which
 everything else can be built in Forth:
@@ -286,6 +300,8 @@ everything else can be built in Forth:
           NEXT
 #+end_src
 
+** Variables
+
 Besides primitives, a few variables are exposed to Forth code:
 TIB, STATE, >IN, HERE, and LATEST. With sectorforth's >IN being
 both an offset and a pointer into TIB (as TIB starts at 0x0000),
@@ -311,6 +327,8 @@ fashion (e.g. TIB >IN @ +).
           NEXT
 #+end_src
 
+** ~next~
+
 Strategically define next here so most jumps to it are short,
 saving extra bytes that would be taken by near jumps.
 
@@ -319,6 +337,8 @@ saving extra bytes that would be taken by near jumps.
           lodsw                   ; load next word's address into AX
           jmp ax                  ; jump directly to it
 #+end_src
+
+** ~HERE~ and ~LATEST~
 
 Words and data space for the HERE and LATEST variables.
 
@@ -333,6 +353,8 @@ Words and data space for the HERE and LATEST variables.
           NEXT
   LATEST: dw word_SEMICOLON       ; initialized to last word in dictionary
 #+end_src
+
+** IO
 
 Define a couple of I/O primitives to make things interactive.
 They can also be used to build a richer interpreter loop.
@@ -357,6 +379,8 @@ the lowest 8 bits of the value at the top of the stack.
           call writechar
           NEXT
 #+end_src
+
+** Colon compiler
 
 The colon compiler reads a name from the terminal input buffer,
 creates a dictionary entry for it, writes machine code to jump
@@ -385,6 +409,8 @@ state.
           pop si
           NEXT
 #+end_src
+
+** ~DOCOL~
 
 DOCOL sets up and starts execution of a user-defined words.
 Those differ from words defined in machine code by being
@@ -417,6 +443,8 @@ memory location.
   .addr:  dw DOCOL
 #+end_src
 
+** Semicolon
+
 Semicolon is the only immediate primitive. It writes the address
 of EXIT to the end of a new word definition, makes the word
 visible in the dictionary, and switches back to interpretation
@@ -435,14 +463,14 @@ state.
           NEXT
 #+end_src
 
-Execution starts here.
+** Execution starts here
 
 #+begin_src asm :tangle sectorforth.asm
   start:
           cld                     ; clear direction flag
 #+end_src
 
-Set up segment registers to point to the same segment as CS.
+** Set up segment registers to point to the same segment as CS.
 
 #+begin_src asm :tangle sectorforth.asm
           push cs
@@ -453,11 +481,13 @@ Set up segment registers to point to the same segment as CS.
           pop ss
 #+end_src
 
-Skip error signaling on initialization
+** Skip error signaling on initialization
 
 #+begin_src asm :tangle sectorforth.asm
           jmp init
 #+end_src
+
+** Error handling
 
 Display a red '!!' to let the user know an error happened and the
 interpreter is being reset
@@ -470,7 +500,9 @@ interpreter is being reset
           int 0x10
 #+end_src
 
-Initialize stack pointers, state, and terminal input buffer.
+** Initialize stack pointers, state, and terminal input buffer.
+
+Initialize stack pointers
 
 #+begin_src asm :tangle sectorforth.asm
   init:
@@ -487,7 +519,7 @@ Fill TIB with zeros, and set STATE and >IN to 0
           rep stosb
 #+end_src
 
-Enter the interpreter loop.
+** Enter the interpreter loop.
 
 Words are read one at time and searched for in the dictionary.
 If a word is found in the dictionary, it is either interpreted
@@ -544,6 +576,8 @@ input buffer, and the interpreter goes into interpretation mode.
           jmp ax                  ; otherwise, interpret (execute) the word
   .loop:  dw interpreter
 #+end_src
+
+** Parsing
 
 Parse a word from the terminal input buffer and return its
 address and length in DI and CX, respectively.
@@ -604,6 +638,8 @@ the user can enter input on a fresh, blank line on the screen.
           jmp token               ; try parsing a word again
 #+end_src
 
+** ~writechar~
+
 writechar writes a character to the screen. It uses INT 10/AH=0e
 to perform teletype output, writing the character, updating the
 cursor, and scrolling the screen, all in one go. Writing
@@ -635,7 +671,7 @@ writechar addresses that.
           db 0x55, 0xaa
 #+end_src
 
-New dictionary entries will be written starting here.
+** New dictionary entries will be written starting here.
 
 #+begin_src asm :tangle sectorforth.asm
   start_HERE:
