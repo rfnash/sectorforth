@@ -1,4 +1,4 @@
-        ; sectorforth - a 512-byte, bootable x86 Forth.
+; sectorforth - a 512-byte, bootable x86 Forth.
         ; Copyright (c) 2020 Cesar Blum
         ; Distributed under the MIT license. See LICENSE for details.
         ;
