@@ -109,67 +109,88 @@ implement Forth in different architectures, read Brad Rodriguez's
 * Code
 
 #+begin_src asm :tangle sectorforth.asm
-          ; sectorforth - a 512-byte, bootable x86 Forth.
-          ; Copyright (c) 2020 Cesar Blum
-          ; Distributed under the MIT license. See LICENSE for details.
-          ;
-          ; sectorforth is a 16-bit x86 Forth that fits entirely within a
-          ; boot sector (512 bytes).
-          ;
-          ; It's a direct threaded Forth, with SI acting as the Forth
-          ; instruction pointer. Words are executed using LODSW to advance
-          ; SI and load the next word's address into AX, which is then
-          ; jumped to.
-          ;
-          ; The SP register is used as the data stack pointer, and the BP
-          ; register acts as the return stack pointer.
-          ;
-          ; The minimum CPU required to run sectorforth is the 386, to use
-          ; the SETNZ instruction.
+  ;; sectorforth - a 512-byte, bootable x86 Forth.
+  ;; Copyright (c) 2020 Cesar Blum
+  ;; Distributed under the MIT license. See LICENSE for details.
+#+end_src
+
+sectorforth is a 16-bit x86 Forth that fits entirely within a
+boot sector (512 bytes).
+
+It's a direct threaded Forth, with SI acting as the Forth
+instruction pointer. Words are executed using LODSW to advance
+SI and load the next word's address into AX, which is then
+jumped to.
+
+The SP register is used as the data stack pointer, and the BP
+register acts as the return stack pointer.
+
+The minimum CPU required to run sectorforth is the 386, to use
+the SETNZ instruction.
+
+#+begin_src asm :tangle sectorforth.asm
           bits 16
           cpu 386
+#+end_src
 
-          ; Set CS to a known value by performing a far jump. Memory up to
-          ; 0x0500 is used by the BIOS. Setting the segment to 0x0500 gives
-          ; sectorforth an entire free segment to work with.
+Set CS to a known value by performing a far jump. Memory up to
+0x0500 is used by the BIOS. Setting the segment to 0x0500 gives
+sectorforth an entire free segment to work with.
+
+#+begin_src asm :tangle sectorforth.asm
           jmp 0x0050:start
+#+end_src
 
-          ; On x86, the boot sector is loaded at 0x7c00 on boot. In segment
-          ; 0x0500, that's 0x7700 (0x0050 << 4 + 0x7700 == 0x7c00).
+On x86, the boot sector is loaded at 0x7c00 on boot. In segment
+0x0500, that's 0x7700 (0x0050 << 4 + 0x7700 == 0x7c00).
+
+#+begin_src asm :tangle sectorforth.asm
           org 0x7700
+#+end_src
 
-          ; Define constants for the memory map. Everything is organized
-          ; within a single 64 KB segment. TIB is placed at 0x0000 to
-          ; simplify input parsing (the Forth variable >IN ends up being
-          ; also a pointer into TIB, so there's no need to add >IN to TIB
-          ; to get a pointer to the parse area). TIB is 4 KB long.
+Define constants for the memory map. Everything is organized
+within a single 64 KB segment. TIB is placed at 0x0000 to
+simplify input parsing (the Forth variable >IN ends up being
+also a pointer into TIB, so there's no need to add >IN to TIB
+to get a pointer to the parse area). TIB is 4 KB long.
+
+#+begin_src asm :tangle sectorforth.asm
   TIB             equ 0x0000      ; terminal input buffer (TIB)
   STATE           equ 0x1000      ; current state (0=interpret, 1=compile)
   TOIN            equ 0x1002      ; current read offset into TIB (>IN)
   RP0             equ 0x76fe      ; bottom of return stack
   SP0             equ 0xfffe      ; bottom of data stack
+#+end_src
 
-          ; Each dictionary entry is laid out in memory as such:
-          ;
-          ; *--------------*--------------*--------------*--------------*
-          ; | Link pointer | Flags+Length |    Name...   |    Code...   |
-          ; *--------------*--------------*--------------*--------------*
-          ;     2 bytes         1 byte      Length bytes     Variable
-          ;
-          ; Flags IMMEDIATE and HIDDEN are used in assembly code. Room is
-          ; left for an additional, user-defined flag, so word names are
-          ; limited to 32 characters.
+Each dictionary entry is laid out in memory as such:
+
+|--------------+--------------+--------------+----------|
+| Link pointer | Flags+Length | Name...      | Code...  |
+|--------------+--------------+--------------+----------|
+| 2 bytes      | 1 byte       | Length bytes | Variable |
+
+Flags IMMEDIATE and HIDDEN are used in assembly code. Room is
+left for an additional, user-defined flag, so word names are
+limited to 32 characters.
+
+#+begin_src asm :tangle sectorforth.asm
   F_IMMEDIATE     equ 0x80
   F_HIDDEN        equ 0x40
   LENMASK         equ 0x1f
+#+end_src
 
-          ; Each dictionary entry needs a link to the previous entry. The
-          ; last entry links to zero, marking the end of the dictionary.
-          ; As dictionary entries are defined, link will be redefined to
-          ; point to the previous entry.
+Each dictionary entry needs a link to the previous entry. The
+last entry links to zero, marking the end of the dictionary.
+As dictionary entries are defined, link will be redefined to
+point to the previous entry.
+
+#+begin_src asm :tangle sectorforth.asm
   %define link 0
+#+end_src
 
-          ; defword lays out a dictionary entry where it is expanded.
+defword lays out a dictionary entry where it is expanded.
+
+#+begin_src asm :tangle sectorforth.asm
   %macro defword 2-3 0            ; name, label, flags
   word_%2:
           dw link                 ; link to previous word
@@ -179,42 +200,55 @@ implement Forth in different architectures, read Brad Rodriguez's
           db %1                   ; name
   %2:                             ; code starts here
   %endmacro
+#+end_src
 
-          ; NEXT advances execution to the next word. The actual code is
-          ; placed further ahead for strategic reasons. The macro has to be
-          ; defined here, since it's used in the words defined ahead.
+NEXT advances execution to the next word. The actual code is
+placed further ahead for strategic reasons. The macro has to be
+defined here, since it's used in the words defined ahead.
+
+#+begin_src asm :tangle sectorforth.asm
   %define NEXT jmp next
+#+end_src
 
-          ; sectorforth has only eight primitive words, with which
-          ; everything else can be built in Forth:
-          ;
-          ; @ ( addr -- x )       Fetch memory at addr
-          ; ! ( x addr -- )       Store x at addr
-          ; sp@ ( -- addr )       Get current data stack pointer
-          ; rp@ ( -- addr )       Get current return stack pointer
-          ; 0= ( x -- f )         -1 if top of stack is 0, 0 otherwise
-          ; + ( x1 x2 -- n )      Add the two values at the top of the stack
-          ; nand ( x1 x2 -- n )   NAND the two values at the top of the stack
-          ; exit ( r:addr -- )    Resume execution at address at the top of
-          ;                       the return stack
+sectorforth has only eight primitive words, with which
+everything else can be built in Forth:
+
+| ~@ ( addr -- x )~     | Fetch memory at addr                                       |
+| ~! ( x addr -- )~     | Store x at addr                                            |
+| ~sp@ ( -- addr )~     | Get current data stack pointer                             |
+| ~rp@ ( -- addr )~     | Get current return stack pointer                           |
+| ~0= ( x -- f )~       | -1 if top of stack is 0, 0 otherwise                       |
+| ~+ ( x1 x2 -- n )~    | Add the two values at the top of the stack                 |
+| ~nand ( x1 x2 -- n )~ | NAND the two values at the top of the stack                |
+| ~exit ( r:addr -- )~  | Resume execution at address at the top of the return stack |
+
+#+begin_src asm :tangle sectorforth.asm
           defword "@",FETCH
           pop bx
           push word [bx]
           NEXT
+#+end_src
 
+#+begin_src asm :tangle sectorforth.asm
           defword "!",STORE
           pop bx
           pop word [bx]
           NEXT
+#+end_src
 
+#+begin_src asm :tangle sectorforth.asm
           defword "sp@",SPFETCH
           push sp
           NEXT
+#+end_src
 
+#+begin_src asm :tangle sectorforth.asm
           defword "rp@",RPFETCH
           push bp
           NEXT
+#+end_src
 
+#+begin_src asm :tangle sectorforth.asm
           defword "0=",ZEROEQUALS
           pop ax
           test ax,ax
@@ -223,14 +257,18 @@ implement Forth in different architectures, read Brad Rodriguez's
           cbw                     ; AH=AL
           push ax
           NEXT
+#+end_src
 
+#+begin_src asm :tangle sectorforth.asm
           defword "+",PLUS
           pop bx
           pop ax
           add ax,bx
           push ax
           NEXT
+#+end_src
 
+#+begin_src asm :tangle sectorforth.asm
           defword "nand",NAND
           pop bx
           pop ax
@@ -238,38 +276,53 @@ implement Forth in different architectures, read Brad Rodriguez's
           not ax
           push ax
           NEXT
+#+end_src
 
+#+begin_src asm :tangle sectorforth.asm
           defword "exit",EXIT
           xchg sp,bp              ; swap SP and BP, SP controls return stack
           pop si                  ; pop address to next word
           xchg sp,bp              ; restore SP and BP
           NEXT
+#+end_src
 
-          ; Besides primitives, a few variables are exposed to Forth code:
-          ; TIB, STATE, >IN, HERE, and LATEST. With sectorforth's >IN being
-          ; both an offset and a pointer into TIB (as TIB starts at 0x0000),
-          ; TIB could be left out. But it is exposed so that sectorforth
-          ; code that accesses the parse area can be written in an idiomatic
-          ; fashion (e.g. TIB >IN @ +).
+Besides primitives, a few variables are exposed to Forth code:
+TIB, STATE, >IN, HERE, and LATEST. With sectorforth's >IN being
+both an offset and a pointer into TIB (as TIB starts at 0x0000),
+TIB could be left out. But it is exposed so that sectorforth
+code that accesses the parse area can be written in an idiomatic
+fashion (e.g. TIB >IN @ +).
+
+#+begin_src asm :tangle sectorforth.asm
           defword "tib",TIBVAR
           push word TIB
           NEXT
+#+end_src
 
+#+begin_src asm :tangle sectorforth.asm
           defword "state",STATEVAR
           push word STATE
           NEXT
+#+end_src
 
+#+begin_src asm :tangle sectorforth.asm
           defword ">in",TOINVAR
           push word TOIN
           NEXT
+#+end_src
 
-          ; Strategically define next here so most jumps to it are short,
-          ; saving extra bytes that would be taken by near jumps.
+Strategically define next here so most jumps to it are short,
+saving extra bytes that would be taken by near jumps.
+
+#+begin_src asm :tangle sectorforth.asm
   next:
           lodsw                   ; load next word's address into AX
           jmp ax                  ; jump directly to it
+#+end_src
 
-          ; Words and data space for the HERE and LATEST variables.
+Words and data space for the HERE and LATEST variables.
+
+#+begin_src asm :tangle sectorforth.asm
           defword "here",HEREVAR
           push word HERE
           NEXT
@@ -279,29 +332,38 @@ implement Forth in different architectures, read Brad Rodriguez's
           push word LATEST
           NEXT
   LATEST: dw word_SEMICOLON       ; initialized to last word in dictionary
+#+end_src
 
-          ; Define a couple of I/O primitives to make things interactive.
-          ; They can also be used to build a richer interpreter loop.
-          ;
-          ; KEY waits for a key press and pushes its scan code (AH) and
-          ; ASCII character (AL) to the stack, both in a single cell.
+Define a couple of I/O primitives to make things interactive.
+They can also be used to build a richer interpreter loop.
+
+KEY waits for a key press and pushes its scan code (AH) and
+ASCII character (AL) to the stack, both in a single cell.
+
+#+begin_src asm :tangle sectorforth.asm
           defword "key",KEY
           mov ah,0
           int 0x16
           push ax
           NEXT
+#+end_src
 
-          ; EMIT writes to the screen the ASCII character corresponding to
-          ; the lowest 8 bits of the value at the top of the stack.
+EMIT writes to the screen the ASCII character corresponding to
+the lowest 8 bits of the value at the top of the stack.
+
+#+begin_src asm :tangle sectorforth.asm
           defword "emit",EMIT
           pop ax
           call writechar
           NEXT
+#+end_src
 
-          ; The colon compiler reads a name from the terminal input buffer,
-          ; creates a dictionary entry for it, writes machine code to jump
-          ; to DOCOL, updates LATEST and HERE, and switches to compilation
-          ; state.
+The colon compiler reads a name from the terminal input buffer,
+creates a dictionary entry for it, writes machine code to jump
+to DOCOL, updates LATEST and HERE, and switches to compilation
+state.
+
+#+begin_src asm :tangle sectorforth.asm
           defword ":",COLON
           call token              ; parse word from input
           push si
@@ -322,19 +384,22 @@ implement Forth in different architectures, read Brad Rodriguez's
           mov byte [STATE],1      ; switch to compilation state
           pop si
           NEXT
+#+end_src
 
-          ; DOCOL sets up and starts execution of a user-defined words.
-          ; Those differ from words defined in machine code by being
-          ; sequences of addresses to other words, so a bit of code is
-          ; needed to save the current value of SI (this Forth's instruction
-          ; pointer), and point it to the sequence of addresses that makes
-          ; up a word's body.
-          ;
-          ; DOCOL advances AX 4 bytes, and then moves that value to SI. When
-          ; DOCOL is jumped to, AX points to the code field of the word
-          ; about to be executed. The 4 bytes being skipped are the actual
-          ; jump instruction to DOCOL itself, inserted by the colon compiler
-          ; when it creates a new entry in the dictionary.
+DOCOL sets up and starts execution of a user-defined words.
+Those differ from words defined in machine code by being
+sequences of addresses to other words, so a bit of code is
+needed to save the current value of SI (this Forth's instruction
+pointer), and point it to the sequence of addresses that makes
+up a word's body.
+
+DOCOL advances AX 4 bytes, and then moves that value to SI. When
+DOCOL is jumped to, AX points to the code field of the word
+about to be executed. The 4 bytes being skipped are the actual
+jump instruction to DOCOL itself, inserted by the colon compiler
+when it creates a new entry in the dictionary.
+
+#+begin_src asm :tangle sectorforth.asm
   DOCOL:
           xchg sp,bp              ; swap SP and BP, SP controls return stack
           push si                 ; push current "instruction pointer"
@@ -342,16 +407,22 @@ implement Forth in different architectures, read Brad Rodriguez's
           add ax,4                ; skip word's code field
           mov si,ax               ; point "instruction pointer" to word body
           NEXT                    ; start executing the word
+#+end_src
 
-          ; The jump instruction inserted by the compiler is an indirect
-          ; jump, so it needs to read the location to jump to from another
-          ; memory location.
+The jump instruction inserted by the compiler is an indirect
+jump, so it needs to read the location to jump to from another
+memory location.
+
+#+begin_src asm :tangle sectorforth.asm
   .addr:  dw DOCOL
+#+end_src
 
-          ; Semicolon is the only immediate primitive. It writes the address
-          ; of EXIT to the end of a new word definition, makes the word
-          ; visible in the dictionary, and switches back to interpretation
-          ; state.
+Semicolon is the only immediate primitive. It writes the address
+of EXIT to the end of a new word definition, makes the word
+visible in the dictionary, and switches back to interpretation
+state.
+
+#+begin_src asm :tangle sectorforth.asm
           defword ";",SEMICOLON,F_IMMEDIATE
           mov bx,[LATEST]
           and byte [bx+2],~F_HIDDEN       ; reveal new word
@@ -362,51 +433,72 @@ implement Forth in different architectures, read Brad Rodriguez's
           stosw                   ; compile contents of AX to HERE
           mov [HERE],di           ; advance HERE to next cell
           NEXT
+#+end_src
 
-          ; Execution starts here.
+Execution starts here.
+
+#+begin_src asm :tangle sectorforth.asm
   start:
           cld                     ; clear direction flag
+#+end_src
 
-          ; Set up segment registers to point to the same segment as CS.
+Set up segment registers to point to the same segment as CS.
+
+#+begin_src asm :tangle sectorforth.asm
           push cs
           push cs
           push cs
           pop ds
           pop es
           pop ss
+#+end_src
 
-          ; Skip error signaling on initialization
+Skip error signaling on initialization
+
+#+begin_src asm :tangle sectorforth.asm
           jmp init
+#+end_src
 
-          ; Display a red '!!' to let the user know an error happened and the
-          ; interpreter is being reset
+Display a red '!!' to let the user know an error happened and the
+interpreter is being reset
+
+#+begin_src asm :tangle sectorforth.asm
   error:
           mov ax,0x0921           ; write '!'
           mov bx,0x0004           ; black background, red text
           mov cx,2                ; twice
           int 0x10
+#+end_src
 
-          ; Initialize stack pointers, state, and terminal input buffer.
+Initialize stack pointers, state, and terminal input buffer.
+
+#+begin_src asm :tangle sectorforth.asm
   init:
           mov bp,RP0              ; BP is the return stack pointer
           mov sp,SP0              ; SP is the data stack pointer
+#+end_src
 
-          ; Fill TIB with zeros, and set STATE and >IN to 0
+Fill TIB with zeros, and set STATE and >IN to 0
+
+#+begin_src asm :tangle sectorforth.asm
           mov al,0
           mov cx,STATE+4
           mov di,TIB
           rep stosb
+#+end_src
 
-          ; Enter the interpreter loop.
-          ;
-          ; Words are read one at time and searched for in the dictionary.
-          ; If a word is found in the dictionary, it is either interpreted
-          ; (i.e. executed) or compiled, depending on the current state and
-          ; the word's IMMEDIATE flag.
-          ;
-          ; When a word is not found, the state of the interpreter is reset:
-          ; the data and return stacks are cleared as well as the terminal
-          ; input buffer, and the interpreter goes into interpretation mode.
+Enter the interpreter loop.
+
+Words are read one at time and searched for in the dictionary.
+If a word is found in the dictionary, it is either interpreted
+(i.e. executed) or compiled, depending on the current state and
+the word's IMMEDIATE flag.
+
+When a word is not found, the state of the interpreter is reset:
+the data and return stacks are cleared as well as the terminal
+input buffer, and the interpreter goes into interpretation mode.
+
+#+begin_src asm :tangle sectorforth.asm
   interpreter:
           call token              ; parse word from input
           mov bx,[LATEST]         ; start searching for it in the dictionary
@@ -451,17 +543,20 @@ implement Forth in different architectures, read Brad Rodriguez's
           jz compile              ; if result is zero, compile
           jmp ax                  ; otherwise, interpret (execute) the word
   .loop:  dw interpreter
+#+end_src
 
-          ; Parse a word from the terminal input buffer and return its
-          ; address and length in DI and CX, respectively.
-          ;
-          ; If after skipping spaces a 0 is found, more input is read from
-          ; the keyboard into the terminal input buffer until return is
-          ; pressed, at which point execution jumps back to the beginning of
-          ; token so it can attempt to parse a word again.
-          ;
-          ; Before reading input from the keyboard, a CRLF is emitted so
-          ; the user can enter input on a fresh, blank line on the screen.
+Parse a word from the terminal input buffer and return its
+address and length in DI and CX, respectively.
+
+If after skipping spaces a 0 is found, more input is read from
+the keyboard into the terminal input buffer until return is
+pressed, at which point execution jumps back to the beginning of
+token so it can attempt to parse a word again.
+
+Before reading input from the keyboard, a CRLF is emitted so
+the user can enter input on a fresh, blank line on the screen.
+
+#+begin_src asm :tangle sectorforth.asm
   token:
           mov di,[TOIN]           ; starting at the current position in TIB
           mov cx,-1               ; search "indefinitely"
@@ -507,13 +602,16 @@ implement Forth in different architectures, read Brad Rodriguez's
                                   ; execution output
           mov word [TOIN],0       ; point >IN to start of TIB
           jmp token               ; try parsing a word again
+#+end_src
 
-          ; writechar writes a character to the screen. It uses INT 10/AH=0e
-          ; to perform teletype output, writing the character, updating the
-          ; cursor, and scrolling the screen, all in one go. Writing
-          ; backspace using the BIOS only moves the cursor backwards within
-          ; a line, but does not move it back to the previous line.
-          ; writechar addresses that.
+writechar writes a character to the screen. It uses INT 10/AH=0e
+to perform teletype output, writing the character, updating the
+cursor, and scrolling the screen, all in one go. Writing
+backspace using the BIOS only moves the cursor backwards within
+a line, but does not move it back to the previous line.
+writechar addresses that.
+
+#+begin_src asm :tangle sectorforth.asm
   writechar:
           push ax                 ; INT 10h/AH=03h clobbers AX in some BIOSes
           mov bh,0                ; video page 0 for all BIOS calls
@@ -535,7 +633,10 @@ implement Forth in different architectures, read Brad Rodriguez's
 
           times 510-($-$$) db 0
           db 0x55, 0xaa
+#+end_src
 
-          ; New dictionary entries will be written starting here.
+New dictionary entries will be written starting here.
+
+#+begin_src asm :tangle sectorforth.asm
   start_HERE:
 #+end_src
