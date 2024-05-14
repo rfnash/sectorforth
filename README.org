@@ -555,20 +555,24 @@ input buffer, and the interpreter goes into interpretation mode.
           jmp .1                  ; try again
   .3:     mov ax,si               ; after comparison, SI points to code field
           mov si,.loop            ; set SI so NEXT loops back to interpreter
-          ; Decide whether to interpret or compile the word. The IMMEDIATE
-          ; flag is located in the most significant bit of the flags+length
-          ; byte. STATE can only be 0 or 1. When ORing those two, these are
-          ; the possibilities:
-          ;
-          ; IMMEDIATE     STATE         OR   ACTION
-          ;   0000000   0000000   00000000   Interpret
-          ;   0000000   0000001   00000001   Compile
-          ;   1000000   0000000   10000000   Interpret
-          ;   1000000   0000001   10000001   Interpret
-          ;
-          ; A word is only compiled when the result of that OR is 1.
-          ; Decrementing that result sets the zero flag for a conditional
-          ; jump.
+#+end_src
+
+Decide whether to interpret or compile the word. The IMMEDIATE
+flag is located in the most significant bit of the flags+length
+byte. STATE can only be 0 or 1. When ORing those two, these are
+the possibilities:
+
+| IMMEDIATE |   STATE |       OR | ACTION    |
+|   0000000 | 0000000 | 00000000 | Interpret |
+|   0000000 | 0000001 | 00000001 | Compile   |
+|   1000000 | 0000000 | 10000000 | Interpret |
+|   1000000 | 0000001 | 10000001 | Interpret |
+
+A word is only compiled when the result of that OR is 1.
+Decrementing that result sets the zero flag for a conditional
+jump.
+
+#+begin_src asm :tangle sectorforth.asm
           and dl,F_IMMEDIATE      ; isolate IMMEDIATE flag
           or dl,[STATE]           ; OR with state
           dec dl                  ; decrement
