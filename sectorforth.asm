@@ -152,12 +152,12 @@ DOCOL:
 defword ";",SEMICOLON,F_IMMEDIATE
         mov bx,[LATEST]
         and byte [bx+2],~F_HIDDEN       ; reveal new word
-        mov byte [STATE],0      ; switch to interpretation state
-        mov ax,EXIT             ; prepare to compile EXIT
+        mov byte [STATE],0              ; switch to interpretation state
+        mov ax,EXIT                     ; prepare to compile EXIT
 compile:
         mov di,[HERE]
-        stosw                   ; compile contents of AX to HERE
-        mov [HERE],di           ; advance HERE to next cell
+        stosw                           ; compile contents of AX to HERE
+        mov [HERE],di                   ; advance HERE to next cell
         NEXT
 
 start:
