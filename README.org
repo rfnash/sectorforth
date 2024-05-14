@@ -228,14 +228,7 @@ defined here, since it's used in the words defined ahead.
 sectorforth has only eight primitive words, with which
 everything else can be built in Forth:
 
-| ~@ ( addr -- x )~     | Fetch memory at addr                                       |
-| ~! ( x addr -- )~     | Store x at addr                                            |
-| ~sp@ ( -- addr )~     | Get current data stack pointer                             |
-| ~rp@ ( -- addr )~     | Get current return stack pointer                           |
-| ~0= ( x -- f )~       | -1 if top of stack is 0, 0 otherwise                       |
-| ~+ ( x1 x2 -- n )~    | Add the two values at the top of the stack                 |
-| ~nand ( x1 x2 -- n )~ | NAND the two values at the top of the stack                |
-| ~exit ( r:addr -- )~  | Resume execution at address at the top of the return stack |
+| ~@ ( addr -- x )~ | Fetch memory at addr |
 
 #+begin_src asm :tangle sectorforth.asm
           defword "@",FETCH
@@ -244,6 +237,8 @@ everything else can be built in Forth:
           NEXT
 #+end_src
 
+| ~! ( x addr -- )~ | Store x at addr |
+
 #+begin_src asm :tangle sectorforth.asm
           defword "!",STORE
           pop bx
@@ -251,17 +246,23 @@ everything else can be built in Forth:
           NEXT
 #+end_src
 
+| ~sp@ ( -- addr )~ | Get current data stack pointer |
+
 #+begin_src asm :tangle sectorforth.asm
           defword "sp@",SPFETCH
           push sp
           NEXT
 #+end_src
 
+| ~rp@ ( -- addr )~ | Get current return stack pointer |
+
 #+begin_src asm :tangle sectorforth.asm
           defword "rp@",RPFETCH
           push bp
           NEXT
 #+end_src
+
+| ~0= ( x -- f )~ | -1 if top of stack is 0, 0 otherwise |
 
 #+begin_src asm :tangle sectorforth.asm
           defword "0=",ZEROEQUALS
@@ -274,6 +275,8 @@ everything else can be built in Forth:
           NEXT
 #+end_src
 
+| ~+ ( x1 x2 -- n )~ | Add the two values at the top of the stack |
+
 #+begin_src asm :tangle sectorforth.asm
           defword "+",PLUS
           pop bx
@@ -282,6 +285,8 @@ everything else can be built in Forth:
           push ax
           NEXT
 #+end_src
+
+| ~nand ( x1 x2 -- n )~ | NAND the two values at the top of the stack |
 
 #+begin_src asm :tangle sectorforth.asm
           defword "nand",NAND
@@ -292,6 +297,8 @@ everything else can be built in Forth:
           push ax
           NEXT
 #+end_src
+
+| ~exit ( r:addr -- )~ | Resume execution at address at the top of the return stack |
 
 #+begin_src asm :tangle sectorforth.asm
           defword "exit",EXIT
